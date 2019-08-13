@@ -23,6 +23,7 @@ import org.jetbrains.kotlin.psi.psiUtil.getParentOfType
 import org.jetbrains.kotlin.psi.stubs.KotlinPlaceHolderStub
 import org.jetbrains.kotlin.psi.stubs.elements.KtStubElementTypes
 import org.jetbrains.kotlin.utils.sure
+import java.util.concurrent.atomic.AtomicLong
 
 interface KtAnonymousInitializer : KtDeclaration, KtStatementExpression {
     val containingDeclaration: KtDeclaration
@@ -49,7 +50,13 @@ class KtClassInitializer : KtDeclarationStub<KotlinPlaceHolderStub<KtClassInitia
         get() = getParentOfType<KtClassOrObject>(true).sure { "Should only be present in class or object" }
 }
 
-class KtScriptInitializer(node: ASTNode) : KtDeclarationImpl(node), KtAnonymousInitializer {
+class KtScriptInitializer : KtDeclarationStub<KotlinPlaceHolderStub<KtScriptInitializer>>, KtAnonymousInitializer {
+    private val modificationStamp = AtomicLong()
+
+    constructor(node: ASTNode) : super(node)
+
+    constructor(stub: KotlinPlaceHolderStub<KtScriptInitializer>) : super(stub, KtStubElementTypes.SCRIPT_INITIALIZER)
+
     override val body: KtExpression?
         get() = findChildByClass(KtExpression::class.java)
 
@@ -57,4 +64,13 @@ class KtScriptInitializer(node: ASTNode) : KtDeclarationImpl(node), KtAnonymousI
         get() = getParentOfType<KtScript>(true).sure { "Should only be present in script" }
 
     override fun <R, D> accept(visitor: KtVisitor<R, D>, data: D) = visitor.visitScriptInitializer(this, data)
+
+    override fun subtreeChanged() {
+        super.subtreeChanged()
+        modificationStamp.getAndIncrement()
+    }
+
+    override fun getModificationStamp(): Long {
+        return modificationStamp.get()
+    }
 }
