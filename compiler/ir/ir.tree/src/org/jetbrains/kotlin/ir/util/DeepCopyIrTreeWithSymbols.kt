@@ -159,6 +159,7 @@ open class DeepCopyIrTreeWithSymbols(
                 symbolRemapper.getReferencedFunction(it) as IrSimpleFunctionSymbol
             }
             transformFunctionChildren(declaration)
+            correspondingPropertySymbol = declaration.correspondingPropertySymbol
         }
 
     override fun visitConstructor(declaration: IrConstructor): IrConstructor =
