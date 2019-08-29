@@ -19,7 +19,6 @@ import org.jetbrains.kotlin.backend.jvm.codegen.isInlineIrExpression
 import org.jetbrains.kotlin.backend.jvm.ir.createJvmIrBuilder
 import org.jetbrains.kotlin.backend.jvm.ir.irArray
 import org.jetbrains.kotlin.backend.jvm.ir.isInlineParameter
-import org.jetbrains.kotlin.codegen.PropertyReferenceCodegen
 import org.jetbrains.kotlin.descriptors.Visibilities
 import org.jetbrains.kotlin.ir.IrStatement
 import org.jetbrains.kotlin.ir.builders.*
@@ -41,6 +40,7 @@ import org.jetbrains.kotlin.ir.visitors.IrElementTransformerVoid
 import org.jetbrains.kotlin.ir.visitors.transformChildrenVoid
 import org.jetbrains.kotlin.load.java.JavaVisibilities
 import org.jetbrains.kotlin.name.Name
+import org.jetbrains.kotlin.resolve.DescriptorUtils
 import org.jetbrains.kotlin.utils.addIfNotNull
 
 internal val callableReferencePhase = makeIrFilePhase(
@@ -319,10 +319,14 @@ internal class CallableReferenceLowering(private val context: JvmBackendContext)
             get() = (metadata as? MetadataSource.Function)?.descriptor?.name ?: name
 
         private fun createGetSignatureMethod(superFunction: IrSimpleFunction): IrSimpleFunction = buildOverride(superFunction).apply {
-            val state = context.state
+            val codegenContext = context
             body = context.createIrBuilder(symbol, startOffset, endOffset).run {
                 // TODO do not use descriptors
-                irExprBody(irString(PropertyReferenceCodegen.getSignatureString(irFunctionReference.symbol.descriptor, state)))
+                val declaration = codegenContext.referenceFunction(
+                    DescriptorUtils.unwrapFakeOverride(irFunctionReference.symbol.descriptor).original
+                ).owner
+                val method = codegenContext.methodSignatureMapper.mapAsmMethod(declaration)
+                irExprBody(irString(method.name + method.descriptor))
             }
         }
 
