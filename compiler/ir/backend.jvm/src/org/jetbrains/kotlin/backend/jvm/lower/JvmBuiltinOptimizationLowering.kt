@@ -103,10 +103,12 @@ class JvmBuiltinOptimizationLowering(val context: JvmBackendContext) : FileLower
                     it.condition.isFalseConst() && isCompilerGenerated
                 }
                 if (expression.origin == IrStatementOrigin.ANDAND) {
-                    assert(expression.type.isBoolean()
-                            && expression.branches.size == 2
-                            && expression.branches[1].condition.isTrueConst()
-                            && expression.branches[1].result.isFalseConst()) {
+                    assert(
+                        expression.type.isBoolean()
+                                && expression.branches.size == 2
+                                && expression.branches[1].condition.isTrueConst()
+                                && expression.branches[1].result.isFalseConst()
+                    ) {
                         "ANDAND condition should have an 'if true then false' body on its second branch. " +
                                 "Failing expression: ${expression.dump()}"
                     }
@@ -126,7 +128,8 @@ class JvmBuiltinOptimizationLowering(val context: JvmBackendContext) : FileLower
                         expression.type.isBoolean()
                                 && expression.branches.size == 2
                                 && expression.branches[0].result.isTrueConst()
-                                && expression.branches[1].condition.isTrueConst()) {
+                                && expression.branches[1].condition.isTrueConst()
+                    ) {
                         "OROR condition should have an 'if a then true' body on its first branch, " +
                                 "and an 'if true then b' body on its second branch. " +
                                 "Failing expression: ${expression.dump()}"
@@ -158,8 +161,7 @@ class JvmBuiltinOptimizationLowering(val context: JvmBackendContext) : FileLower
                         statement.initializer is IrConst<*>
             }
 
-            override fun visitBlock(expression: IrBlock): IrExpression {
-                expression.transformChildrenVoid(this)
+            private fun removeUnnecessaryTemporaryVariables(statements: MutableList<IrStatement>) {
                 // Remove declarations of immutable temporary variables with constant values.
                 // IrGetValue operations for such temporary variables are replaced
                 // by the initializer IrConst. This makes sure that we do not load and
@@ -188,9 +190,10 @@ class JvmBuiltinOptimizationLowering(val context: JvmBackendContext) : FileLower
                 //
                 // which allows the equality check to be simplified away and we end up with
                 // just a const string load.
-                expression.statements.removeIf {
+                statements.removeIf {
                     isImmutableTemporaryVariableWithConstantValue(it)
                 }
+
                 // Remove a block that contains only two statements: the declaration of a temporary
                 // variable and a load of the value of that temporary variable with just the initializer
                 // for the temporary variable. We only perform this transformation for compiler generated
@@ -222,17 +225,28 @@ class JvmBuiltinOptimizationLowering(val context: JvmBackendContext) : FileLower
                 //      42.toLong()
                 //
                 // Doing so we avoid local loads and stores.
-                if (expression.statements.size == 2) {
-                    val first = expression.statements[0]
-                    val second = expression.statements[1]
+                if (statements.size == 2) {
+                    val first = statements[0]
+                    val second = statements[1]
                     if (first is IrVariable
                         && first.origin == IrDeclarationOrigin.IR_TEMPORARY_VARIABLE
                         && second is IrGetValue
                         && first.symbol == second.symbol) {
-                        expression.statements.clear()
-                        first.initializer?.let { expression.statements.add(it) }
+                        statements.clear()
+                        first.initializer?.let { statements.add(it) }
                     }
                 }
+            }
+
+            override fun visitBlockBody(body: IrBlockBody): IrBody {
+                body.transformChildrenVoid(this)
+                removeUnnecessaryTemporaryVariables(body.statements)
+                return body
+            }
+
+            override fun visitContainerExpression(expression: IrContainerExpression): IrExpression {
+                expression.transformChildrenVoid(this)
+                removeUnnecessaryTemporaryVariables(expression.statements)
                 return expression
             }
 

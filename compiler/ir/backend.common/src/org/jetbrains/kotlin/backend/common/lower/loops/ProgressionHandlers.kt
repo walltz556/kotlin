@@ -326,8 +326,7 @@ internal abstract class IndexedGetIterationHandler(protected val context: Common
             // This also ensures that the semantics of re-assignment of array variables used in the loop is consistent with the semantics
             // proposed in https://youtrack.jetbrains.com/issue/KT-21354.
             val arrayReference = scope.createTemporaryVariable(
-                expression, nameHint = "indexedObject",
-                origin = IrDeclarationOrigin.FOR_LOOP_IMPLICIT_VARIABLE
+                expression, nameHint = "indexedObject"
             )
 
             // `last = array.size` (last is exclusive) for the loop `for (i in array.indices)`.
