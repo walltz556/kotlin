@@ -6,6 +6,8 @@
 package org.jetbrains.kotlin.asJava.classes;
 
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.util.Computable;
+import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.SimpleModificationTracker;
 import com.intellij.psi.*;
 import com.intellij.psi.augment.PsiAugmentProvider;
@@ -16,9 +18,11 @@ import com.intellij.psi.impl.source.PsiExtensibleClass;
 import com.intellij.psi.scope.ElementClassHint;
 import com.intellij.psi.scope.NameHint;
 import com.intellij.psi.scope.PsiScopeProcessor;
+import com.intellij.psi.util.CachedValue;
 import com.intellij.psi.util.CachedValueProvider;
 import com.intellij.psi.util.CachedValuesManager;
 import com.intellij.util.ArrayUtil;
+import com.intellij.util.ConcurrencyUtil;
 import com.intellij.util.SmartList;
 import com.intellij.util.containers.ContainerUtil;
 import gnu.trove.THashMap;
@@ -28,6 +32,7 @@ import org.jetbrains.annotations.Nullable;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentMap;
 
 import static com.intellij.util.ObjectUtils.notNull;
 
@@ -37,6 +42,7 @@ public class KotlinClassInnerStuffCache {
     private final PsiExtensibleClass myClass;
     private final SimpleModificationTracker myTracker = new SimpleModificationTracker();
     private final List<Object> dependencies;
+    private static final ConcurrentMap<String, Key<CachedValue>> keysForProvider = ContainerUtil.newConcurrentMap();
 
     public KotlinClassInnerStuffCache(@NotNull PsiExtensibleClass aClass, @NotNull List<Object> externalDependencies) {
         myClass = aClass;
@@ -46,24 +52,60 @@ public class KotlinClassInnerStuffCache {
         dependencies.add(myTracker);
     }
 
+    private <T> T get(@NotNull String name, @NotNull Computable<T> provider) {
+        final Key<CachedValue<T>> key = getKeyForClass(name);
+        final CachedValue<T> cachedValue = myClass.getUserData(key);
+
+        if (cachedValue != null && cachedValue.hasUpToDateValue()) {
+            return cachedValue.getValue();
+        }
+
+        // sync on key to avoid near simultaneous heavy allocations in different threads
+        synchronized (key) {
+            return CachedValuesManager.getManager(myClass.getProject()).getCachedValue(myClass, key, () -> {
+                CachedValue<T> newCachedValue = myClass.getUserData(key);
+                T value;
+                if (newCachedValue != null && newCachedValue.hasUpToDateValue()) {
+                    value = newCachedValue.getValue();
+                }
+                else {
+                    T compute = provider.compute();
+                    value = compute;
+                }
+
+                return CachedValueProvider.Result.create(value, dependencies);
+            }, false);
+        }
+    }
+
+    private <T> Key<CachedValue<T>> getKeyForClass(@NotNull String name) {
+        String keyName = getClass().getName() + "_" + name;
+        Key<CachedValue<T>> key = (Key) keysForProvider.get(keyName);
+        if (key == null) {
+            key = (Key) ConcurrencyUtil.cacheOrGet(keysForProvider, keyName, Key.create(keyName));
+        }
+
+        return key;
+    }
+
     @NotNull
     public PsiMethod[] getConstructors() {
-        return copy(CachedValuesManager.getCachedValue(myClass, () -> makeResult(PsiImplUtil.getConstructors(myClass))));
+        return copy(get("getConstructors", () -> PsiImplUtil.getConstructors(myClass)));
     }
 
     @NotNull
     public PsiField[] getFields() {
-        return copy(CachedValuesManager.getCachedValue(myClass, () -> makeResult(getAllFields())));
+        return copy(get("getAllFields", this::getAllFields));
     }
 
     @NotNull
     public PsiMethod[] getMethods() {
-        return copy(CachedValuesManager.getCachedValue(myClass, () -> makeResult(getAllMethods())));
+        return copy(get("getAllMethods", this::getAllMethods));
     }
 
     @NotNull
     public PsiClass[] getInnerClasses() {
-        return copy(CachedValuesManager.getCachedValue(myClass, () -> makeResult(getAllInnerClasses())));
+        return copy(get("getAllInnerClasses", this::getAllInnerClasses));
     }
 
     @Nullable
@@ -72,7 +114,7 @@ public class KotlinClassInnerStuffCache {
             return PsiClassImplUtil.findFieldByName(myClass, name, true);
         }
         else {
-            return CachedValuesManager.getCachedValue(myClass, () -> makeResult(getFieldsMap())).get(name);
+            return get("getFieldsMap", this::getFieldsMap).get(name);
         }
     }
 
@@ -82,7 +124,7 @@ public class KotlinClassInnerStuffCache {
             return PsiClassImplUtil.findMethodsByName(myClass, name, true);
         }
         else {
-            return copy(notNull(CachedValuesManager.getCachedValue(myClass, () -> makeResult(getMethodsMap())).get(name), PsiMethod.EMPTY_ARRAY));
+            return copy(notNull(get("getMethodsMap", this::getMethodsMap).get(name), PsiMethod.EMPTY_ARRAY));
         }
     }
 
@@ -92,27 +134,22 @@ public class KotlinClassInnerStuffCache {
             return PsiClassImplUtil.findInnerByName(myClass, name, true);
         }
         else {
-            return CachedValuesManager.getCachedValue(myClass, () -> makeResult(getInnerClassesMap())).get(name);
+            return get("getInnerClassesMap", this::getInnerClassesMap).get(name);
         }
     }
 
     @Nullable
     public PsiMethod getValuesMethod() {
-        return myClass.isEnum() && myClass.getName() != null ? CachedValuesManager.getCachedValue(myClass, () -> makeResult(makeValuesMethod())) : null;
+        return myClass.isEnum() && myClass.getName() != null ? get("makeValuesMethod", this::makeValuesMethod) : null;
     }
 
     @Nullable
     public PsiMethod getValueOfMethod() {
-        return myClass.isEnum() && myClass.getName() != null ? CachedValuesManager.getCachedValue(myClass, () -> makeResult(makeValueOfMethod())) : null;
+        return myClass.isEnum() && myClass.getName() != null ? get("makeValueOfMethod", this::makeValueOfMethod) : null;
     }
 
     private static <T> T[] copy(T[] value) {
         return value.length == 0 ? value : value.clone();
-    }
-
-    // This method is modified
-    private <T> CachedValueProvider.Result<T> makeResult(T value) {
-        return CachedValueProvider.Result.create(value, dependencies);
     }
 
     @NotNull
