@@ -38,8 +38,6 @@ import org.jetbrains.kotlin.name.Name
 import org.jetbrains.kotlin.platform.TargetPlatform
 import org.jetbrains.kotlin.platform.TargetPlatformVersion
 import org.jetbrains.kotlin.psi.KtFile
-import org.jetbrains.kotlin.resolve.CompilerEnvironment
-import org.jetbrains.kotlin.resolve.TargetEnvironment
 import org.jetbrains.kotlin.storage.StorageManager
 import org.jetbrains.kotlin.storage.getValue
 import java.util.*
@@ -67,6 +65,8 @@ abstract class ResolverForProject<M : ModuleInfo> {
         const val resolverForLibrariesName = "project libraries"
         const val resolverForModulesName = "project source roots and libraries"
         const val resolverForScriptDependenciesName = "dependencies of scripts"
+        const val resolverForScriptDependenciesSourcesName = "dependencies sources of scripts"
+        const val resolverForScriptsName = "script files"
 
         const val resolverForSpecialInfoName = "completion/highlighting in "
     }
@@ -447,12 +447,9 @@ private object DiagnoseUnknownModuleInfoReporter {
                 }
             }
             name.contains(ResolverForProject.resolverForScriptDependenciesName) -> errorInScriptDependenciesInfoResolver(message)
-            name.contains(ResolverForProject.resolverForSpecialInfoName) -> {
-                when {
-                    name.contains("ScriptModuleInfo") -> errorInScriptModuleInfoResolver(message)
-                    else -> errorInSpecialModuleInfoResolver(message)
-                }
-            }
+            name.contains(ResolverForProject.resolverForScriptDependenciesSourcesName) -> errorInScriptDependenciesSourceInfoResolver(message)
+            name.contains(ResolverForProject.resolverForScriptsName) -> errorInScriptModuleInfoResolver(message)
+            name.contains(ResolverForProject.resolverForSpecialInfoName) -> errorInSpecialModuleInfoResolver(message)
             else -> otherError(message)
         }
     }
@@ -468,6 +465,7 @@ private object DiagnoseUnknownModuleInfoReporter {
     private fun errorInModulesResolverWithLibraryInfo(message: String): Nothing = throw AssertionError(message)
 
     private fun errorInScriptDependenciesInfoResolver(message: String): Nothing = throw AssertionError(message)
+    private fun errorInScriptDependenciesSourceInfoResolver(message: String): Nothing = throw AssertionError(message)
     private fun errorInScriptModuleInfoResolver(message: String): Nothing = throw AssertionError(message)
     private fun errorInSpecialModuleInfoResolver(message: String): Nothing = throw AssertionError(message)
 
