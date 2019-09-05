@@ -44,29 +44,29 @@ open class SerializationPluginDeclarationChecker : DeclarationChecker {
         analyzePropertiesSerializers(context.trace, descriptor, props.serializableProperties)
     }
 
-    private fun canBeSerializedInternally(descriptor: ClassDescriptor, trace: BindingTrace): Boolean {
+    protected fun canBeSerializedInternally(descriptor: ClassDescriptor, trace: BindingTrace?): Boolean {
         if (!descriptor.annotations.hasAnnotation(SerializationAnnotations.serializableAnnotationFqName)) return false
 
         if (!serializationPluginEnabledOn(descriptor)) {
-            trace.reportOnSerializableAnnotation(descriptor, SerializationErrors.PLUGIN_IS_NOT_ENABLED)
+            trace?.reportOnSerializableAnnotation(descriptor, SerializationErrors.PLUGIN_IS_NOT_ENABLED)
             return false
         }
 
         if (descriptor.isInline) {
-            trace.reportOnSerializableAnnotation(descriptor, SerializationErrors.INLINE_CLASSES_NOT_SUPPORTED)
+            trace?.reportOnSerializableAnnotation(descriptor, SerializationErrors.INLINE_CLASSES_NOT_SUPPORTED)
             return false
         }
         if (!descriptor.hasSerializableAnnotationWithoutArgs) return false
 
         if (!descriptor.isInternalSerializable && !descriptor.hasCompanionObjectAsSerializer) {
-            trace.reportOnSerializableAnnotation(descriptor, SerializationErrors.SERIALIZABLE_ANNOTATION_IGNORED)
+            trace?.reportOnSerializableAnnotation(descriptor, SerializationErrors.SERIALIZABLE_ANNOTATION_IGNORED)
             return false
         }
 
         // check that we can instantiate supertype
         val superClass = descriptor.getSuperClassOrAny()
         if (!superClass.isInternalSerializable && superClass.constructors.singleOrNull { it.valueParameters.size == 0 } == null) {
-            trace.reportOnSerializableAnnotation(descriptor, SerializationErrors.NON_SERIALIZABLE_PARENT_MUST_HAVE_NOARG_CTOR)
+            trace?.reportOnSerializableAnnotation(descriptor, SerializationErrors.NON_SERIALIZABLE_PARENT_MUST_HAVE_NOARG_CTOR)
             return false
         }
         return true
@@ -85,7 +85,7 @@ open class SerializationPluginDeclarationChecker : DeclarationChecker {
         if (descriptor.hasCompanionObjectAsSerializer) return null // customized by user
 
         val props = SerializableProperties(descriptor, trace.bindingContext)
-        if (!props.isExternallySerializable) trace.reportOnSerializableAnnotation(
+        if (!props.isExternallySerializable) trace?.reportOnSerializableAnnotation(
             descriptor,
             SerializationErrors.PRIMARY_CONSTRUCTOR_PARAMETER_IS_NOT_A_PROPERTY
         )
@@ -95,7 +95,7 @@ open class SerializationPluginDeclarationChecker : DeclarationChecker {
         props.serializableProperties.forEach {
             if (!namesSet.add(it.name)) {
                 descriptor.safeReport { a ->
-                    trace.reportFromPlugin(
+                    trace?.reportFromPlugin(
                         SerializationErrors.DUPLICATE_SERIAL_NAME.on(a, it.name),
                         SerializationPluginErrorsRendering
                     )

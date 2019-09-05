@@ -37,12 +37,15 @@ import org.jetbrains.kotlin.asJava.classes.*
 import org.jetbrains.kotlin.asJava.finder.JavaElementFinder
 import org.jetbrains.kotlin.codegen.ClassBuilderMode
 import org.jetbrains.kotlin.codegen.JvmCodegenUtil
+import org.jetbrains.kotlin.codegen.extensions.ExpressionCodegenExtension
 import org.jetbrains.kotlin.codegen.state.KotlinTypeMapper
 import org.jetbrains.kotlin.config.JvmTarget
 import org.jetbrains.kotlin.config.LanguageFeature
 import org.jetbrains.kotlin.descriptors.ClassifierDescriptor
 import org.jetbrains.kotlin.descriptors.DeclarationDescriptor
 import org.jetbrains.kotlin.descriptors.annotations.AnnotationDescriptor
+import org.jetbrains.kotlin.extensions.CodegenApplicabilityCheckerExtension
+import org.jetbrains.kotlin.extensions.DeclarationAttributeAltererExtension
 import org.jetbrains.kotlin.idea.caches.lightClasses.IDELightClassContexts
 import org.jetbrains.kotlin.idea.caches.lightClasses.LazyLightClassDataHolder
 import org.jetbrains.kotlin.idea.facet.KotlinFacet
@@ -53,7 +56,6 @@ import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.name.FqName
 import org.jetbrains.kotlin.name.Name
 import org.jetbrains.kotlin.psi.*
-import org.jetbrains.kotlin.psi.psiUtil.hasExpectModifier
 import org.jetbrains.kotlin.resolve.BindingContext
 import org.jetbrains.kotlin.resolve.deprecation.DeprecationResolver
 import org.jetbrains.kotlin.resolve.descriptorUtil.fqNameSafe
@@ -62,7 +64,6 @@ import org.jetbrains.kotlin.resolve.lazy.BodyResolveMode
 import org.jetbrains.kotlin.resolve.lazy.NoDescriptorForDeclarationException
 import org.jetbrains.kotlin.resolve.source.getPsi
 import org.jetbrains.kotlin.types.KotlinType
-import org.jetbrains.kotlin.utils.keysToMap
 import java.util.concurrent.ConcurrentMap
 
 class IDELightClassGenerationSupport(private val project: Project) : LightClassGenerationSupport() {
@@ -78,12 +79,36 @@ class IDELightClassGenerationSupport(private val project: Project) : LightClassG
         override val isReleasedCoroutine
             get() = module.languageVersionSettings.supportsFeature(LanguageFeature.ReleaseCoroutines)
 
-        override fun isTooComplexForUltraLightGeneration(element: KtDeclaration): Boolean {
+        private fun KtDeclaration.syntheticPartsCouldBeApplied(): Boolean {
+
             val facet = KotlinFacet.get(module)
             val pluginClasspaths = facet?.configuration?.settings?.compilerArguments?.pluginClasspaths
-            if (!pluginClasspaths.isNullOrEmpty()) {
-                val stringifiedClasspaths = pluginClasspaths.joinToString()
-                LOG.debug { "Using heavy light classes for ${element.forLogString()} because of compiler plugins $stringifiedClasspaths" }
+            if (pluginClasspaths.isNullOrEmpty()) return false
+
+            //For now there is only two types of backend mutators are known: DeclarationAttributeAltererExtension (like a allopen) and ExpressionCodegenExtension
+            val haveNoAlterer = DeclarationAttributeAltererExtension.getInstances(project).isEmpty()
+            if (haveNoAlterer) {
+                val extensions = ExpressionCodegenExtension.getInstances(project)
+                if (extensions.isEmpty()) return false
+                if (extensions.all { !it.shouldGenerateClassSyntheticPartsInLightClassesMode }) return false
+            }
+
+            val applicabilityExtensions =
+                getResolutionFacade().tryGetIterableFrontendServices(this, CodegenApplicabilityCheckerExtension::class.java)
+                    ?: return false
+
+            val resolvedDescriptor = lazy(LazyThreadSafetyMode.NONE) { resolveToDescriptorIfAny() }
+
+            return applicabilityExtensions.any {
+                it.syntheticPartsCouldBeGenerated(this, resolvedDescriptor)
+            }
+        }
+
+        override fun isTooComplexForUltraLightGeneration(element: KtDeclaration): Boolean {
+
+            val codegenExtensionsEnabled = element.syntheticPartsCouldBeApplied()
+             if (codegenExtensionsEnabled) {
+                LOG.debug { "Using heavy light classes because of compiler plugins" }
                 return true
             }
 
