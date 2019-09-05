@@ -349,25 +349,6 @@ class KotlinCacheServiceImpl(val project: Project) : KotlinCacheService {
             project,
             "facadeForScriptModuleInfo"
         )
-
-        // File copies are created during completion and receive correct modification events through POM.
-        // Dummy files created e.g. by J2K do not receive events.
-        val filesModificationTracker = if (files.all { it.originalFile != it }) {
-            ModificationTracker {
-                files.sumByLong { it.outOfBlockModificationCount }
-            }
-        } else {
-            ModificationTracker {
-                files.sumByLong { it.outOfBlockModificationCount + it.modificationStamp }
-            }
-        }
-
-        val dependenciesForSyntheticFileCache =
-            listOf(
-                KotlinCodeBlockModificationListener.getInstance(project).kotlinOutOfCodeBlockTracker,
-                filesModificationTracker
-            )
-
         return ProjectResolutionFacade(
             "facadeForScriptModuleInfo",
             "$resolverForScriptsName ${files.joinToString { it.name }} for platform $platform",
@@ -377,7 +358,7 @@ class KotlinCacheServiceImpl(val project: Project) : KotlinCacheService {
             syntheticFiles = files,
             reuseDataFrom = facadeForScriptDependencies,
             moduleFilter = { it == scriptModuleInfo },
-            dependencies = dependenciesForSyntheticFileCache,
+            dependencies = listOf(KotlinCodeBlockModificationListener.getInstance(project).kotlinOutOfCodeBlockTracker),
             invalidateOnOOCB = true,
             allModules = scriptModuleInfo.dependencies(),
             builtInsCache = facadeForScriptDependencies.builtInsCache
