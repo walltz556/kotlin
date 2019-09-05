@@ -13,7 +13,6 @@ import com.intellij.util.containers.SLRUCache
 import org.jetbrains.kotlin.analyzer.ResolverForProject.Companion.resolverForScriptDependenciesName
 import org.jetbrains.kotlin.analyzer.ResolverForProject.Companion.resolverForScriptDependenciesSourcesName
 import org.jetbrains.kotlin.analyzer.ResolverForProject.Companion.resolverForScriptsName
-import org.jetbrains.kotlin.config.LanguageFeature
 import org.jetbrains.kotlin.idea.caches.project.*
 import org.jetbrains.kotlin.idea.caches.project.IdeaModuleInfo
 import org.jetbrains.kotlin.idea.caches.resolve.util.contextWithCompositeExceptionTracker
@@ -132,13 +131,8 @@ internal class KotlinCacheServiceForScripts(
 
     @Synchronized
     private fun getOrBuildScriptsGlobalFacade(): ScriptsGlobalFacade {
-        val settings = PlatformAnalysisSettings.create(
-            project = project,
-            platform = JvmPlatforms.defaultJvmPlatform, // TODO: Js scripts?
-            sdk = ScriptDependenciesInfo.ForProject(project).sdk,
-            isAdditionalBuiltInFeaturesSupported = true,
-            isReleaseCoroutines = LanguageFeature.ReleaseCoroutines.defaultState == LanguageFeature.State.ENABLED
-        )
+        val platform = JvmPlatforms.defaultJvmPlatform // TODO: Js scripts?
+        val settings = ScriptDependenciesInfo.ForProject(project).platformSettings(project, platform)
         return globalScriptFacadesPerPlatformAndSdk[settings]
     }
 
@@ -181,12 +175,8 @@ internal class KotlinCacheServiceForScripts(
     }
 
     private fun createFacadeForScriptDependencies(moduleInfo: ScriptDependenciesInfo.ForFile): ProjectResolutionFacade {
-        val sdk = moduleInfo.sdk
         val platform = JvmPlatforms.defaultJvmPlatform // TODO: Js scripts?
-        val settings = PlatformAnalysisSettings.create(
-            project, platform, sdk, true,
-            LanguageFeature.ReleaseCoroutines.defaultState == LanguageFeature.State.ENABLED
-        )
+        val settings = moduleInfo.platformSettings(project, platform)
 
         val relatedModules = ScriptAdditionalIdeaDependenciesProvider.getRelatedModules(moduleInfo.scriptFile, project)
 
