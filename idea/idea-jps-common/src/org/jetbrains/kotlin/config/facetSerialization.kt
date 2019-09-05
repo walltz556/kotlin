@@ -328,7 +328,7 @@ private fun KotlinFacetSettings.writeLatestConfig(element: Element) {
         element.setAttribute("externalProjectId", externalProjectId)
     }
     if (isHmppEnabled) {
-        element.setAttribute("isHmppProject", isHmppEnabled.toString())
+        element.setAttribute("isHmppProject", mppVersion.isHmpp.toString())
     }
     if (pureKotlinSourceFolders.isNotEmpty()) {
         element.setAttribute("pureKotlinSourceFolders", pureKotlinSourceFolders.joinToString(";"))

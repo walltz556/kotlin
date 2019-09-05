@@ -28,7 +28,7 @@ import org.jetbrains.kotlin.platform.TargetPlatform
 import org.jetbrains.kotlin.platform.isCommon
 
 val Module.isNewMPPModule: Boolean
-    get() = facetSettings?.kind?.isNewMPP ?: false
+    get() = facetSettings?.mppVersion?.isNewMPP ?: false
 
 val Module.externalProjectId: String
     get() = facetSettings?.externalProjectId ?: ""
@@ -43,7 +43,7 @@ val Module.isTestModule: Boolean
     get() = facetSettings?.isTestModule ?: false
 
 val KotlinFacetSettings.isMPPModule: Boolean
-    get() = this.mppVersion?.isMPPModule ?: false
+    get() = this.mppVersion != null
 
 private val Module.facetSettings get() = KotlinFacet.get(this)?.configuration?.settings
 
