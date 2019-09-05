@@ -21,16 +21,13 @@ import com.intellij.psi.util.CachedValueProvider
 import com.intellij.util.ArrayUtil
 import com.intellij.util.containers.ContainerUtil
 import gnu.trove.THashMap
-import java.util.concurrent.TimeUnit
-import java.util.concurrent.locks.ReentrantLock
 
 class KotlinClassInnerStuffCache(val myClass: PsiExtensibleClass, externalDependencies: List<Any>) {
     private val myTracker = SimpleModificationTracker()
     private val dependencies: List<Any> = externalDependencies + myTracker
 
-
     fun <T> get(initializer: () -> T) = object : Lazy<T> {
-        private val lock: ReentrantLock = ReentrantLock()
+        // Note: holder is used as initialization monitor as well
         private val holder = lazyPub {
             PsiCachedValueImpl(PsiManager.getInstance(myClass.project),
                                CachedValueProvider<T> {
@@ -45,11 +42,22 @@ class KotlinClassInnerStuffCache(val myClass: PsiExtensibleClass, externalDepend
                 return if (cachedValue.hasUpToDateValue()) {
                     cachedValue.value!!
                 } else {
-                    // prevent initialization from different threads
-                    // in case of cyclic dependency it falls into pessimistic way of extra initialization
-                    if (lock.tryLock(1, TimeUnit.SECONDS)) {
-                        cachedValue.value!!
+                    val initializationFlag = getInitializationFlag.get()
+
+                    if (!initializationFlag[0]) {
+                        // prevent initialization from different threads
+                        synchronized(holder) {
+                            // mark this thread as performing initialization
+                            initializationFlag[0] = true
+                            try {
+                                cachedValue.value!!
+                            } finally {
+                                initializationFlag[0] = false
+                            }
+                        }
                     } else {
+                        // no any reasons to acquire extra locks if this thread is already performing initialization
+                        // as another (parent item) lock is acquired
                         cachedValue.value!!
                     }
                 }
@@ -214,6 +222,11 @@ class KotlinClassInnerStuffCache(val myClass: PsiExtensibleClass, externalDepend
     companion object {
         private const val VALUES_METHOD = "values"
         private const val VALUE_OF_METHOD = "valueOf"
+
+        // use a single item array as mutableBoolean
+        @JvmStatic
+        private val getInitializationFlag: ThreadLocal<Array<Boolean>> =
+            ThreadLocal.withInitial { arrayOf(false) }
 
         // Copy of PsiClassImplUtil.processDeclarationsInEnum for own cache class
         @JvmStatic
