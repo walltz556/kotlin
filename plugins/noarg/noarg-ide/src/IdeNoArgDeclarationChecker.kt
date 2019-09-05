@@ -25,14 +25,30 @@ import com.intellij.psi.util.CachedValueProvider
 import com.intellij.psi.util.CachedValuesManager
 import com.intellij.util.containers.ContainerUtil
 import org.jetbrains.kotlin.annotation.plugin.ide.getSpecialAnnotations
+import org.jetbrains.kotlin.descriptors.ClassDescriptor
+import org.jetbrains.kotlin.descriptors.ClassKind
+import org.jetbrains.kotlin.descriptors.DeclarationDescriptor
+import org.jetbrains.kotlin.extensions.CodegenApplicabilityCheckerExtension
+import org.jetbrains.kotlin.extensions.isNoInlineKtClassWithSomeAnnotations
 import org.jetbrains.kotlin.noarg.NoArgCommandLineProcessor.Companion.ANNOTATION_OPTION
 import org.jetbrains.kotlin.noarg.NoArgCommandLineProcessor.Companion.PLUGIN_ID
 import org.jetbrains.kotlin.noarg.diagnostic.AbstractNoArgDeclarationChecker
+import org.jetbrains.kotlin.psi.KtDeclaration
 import org.jetbrains.kotlin.psi.KtModifierListOwner
 import java.util.concurrent.ConcurrentMap
 
-class IdeNoArgDeclarationChecker(val project: Project) : AbstractNoArgDeclarationChecker() {
-    private companion object {
+class IdeNoArgDeclarationChecker(val project: Project) : AbstractNoArgDeclarationChecker(), CodegenApplicabilityCheckerExtension {
+
+    override fun syntheticPartsCouldBeGenerated(declaration: KtDeclaration, descriptor: Lazy<DeclarationDescriptor?>): Boolean {
+        if (!declaration.isNoInlineKtClassWithSomeAnnotations()) return false
+        if (getAnnotationFqNames(declaration).isEmpty()) return false
+
+        return (descriptor.value as? ClassDescriptor)?.let {
+            it.kind == ClassKind.CLASS && it.hasSpecialAnnotation(declaration)
+        } ?: false
+    }
+
+    internal companion object {
         val ANNOTATION_OPTION_PREFIX = "plugin:$PLUGIN_ID:${ANNOTATION_OPTION.optionName}="
     }
 
