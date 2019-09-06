@@ -22,10 +22,7 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.runWriteAction
 import com.intellij.openapi.editor.Document
 import com.intellij.openapi.editor.EditorFactory
-import com.intellij.openapi.externalSystem.importing.ImportSpecBuilder
-import com.intellij.openapi.externalSystem.service.execution.ProgressExecutionMode
 import com.intellij.openapi.externalSystem.service.project.manage.ExternalProjectsManagerImpl
-import com.intellij.openapi.externalSystem.util.ExternalSystemUtil
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.impl.FileEditorManagerImpl
@@ -70,12 +67,11 @@ import org.jetbrains.kotlin.idea.core.script.ScriptDefinitionsManager
 import org.jetbrains.kotlin.idea.core.script.settings.KotlinScriptingSettings
 import org.jetbrains.kotlin.idea.core.util.toPsiFile
 import org.jetbrains.kotlin.idea.framework.KotlinSdkType
+import org.jetbrains.kotlin.idea.perf.Stats.Companion.runAndMeasure
 import org.jetbrains.kotlin.idea.project.getAndCacheLanguageLevelByDependencies
 import org.jetbrains.kotlin.idea.test.ConfigLibraryUtil
 import org.jetbrains.kotlin.idea.test.invalidateLibraryCache
 import org.jetbrains.kotlin.idea.testFramework.*
-import org.jetbrains.plugins.gradle.service.project.GradleProjectOpenProcessor
-import org.jetbrains.plugins.gradle.util.GradleConstants
 import java.io.File
 import java.nio.file.Paths
 
@@ -161,7 +157,9 @@ abstract class AbstractPerformanceProjectsTest : UsefulTestCase() {
         simpleModule: Boolean = false,
         fast: Boolean = false
     ): Project {
-        val projectPath = File("$path").canonicalPath
+        val projectPath = File(path).canonicalPath
+
+        assertTrue("path $path does not exist, check README.md", File(projectPath).exists())
 
         val warmUpIterations = if (fast) 0 else 1
         val iterations = if (fast) 1 else 3
@@ -177,8 +175,15 @@ abstract class AbstractPerformanceProjectsTest : UsefulTestCase() {
             test = {
                 val project = if (!simpleModule) {
                     val project = projectManagerEx.loadProject(name, path)
-                    assertNotNull(project)
-                    //projectManagerEx.openTestProject(project!!)
+                    assertNotNull("project $name at $path is not loaded", project)
+                    val projectRootManager = ProjectRootManager.getInstance(project!!)
+
+                    runWriteAction {
+                        with(projectRootManager) {
+                            projectSdk = jdk18
+                        }
+                    }
+                    assertTrue("project $name at $path is not opened", projectManagerEx.openProject(project))
                     project
                 } else {
                     val project = projectManagerEx.loadAndOpenProject(projectPath)!!
@@ -195,8 +200,11 @@ abstract class AbstractPerformanceProjectsTest : UsefulTestCase() {
 
                 with(StartupManager.getInstance(project) as StartupManagerImpl) {
                     scheduleInitialVfsRefresh()
+                    runStartupActivities()
                     runPostStartupActivities()
                 }
+
+                logMessage { "project $name is ${if (project.isInitialized) "initialized" else "not initialized"}" }
 
                 with(ChangeListManager.getInstance(project) as ChangeListManagerImpl) {
                     waitUntilRefreshed()
@@ -219,10 +227,10 @@ abstract class AbstractPerformanceProjectsTest : UsefulTestCase() {
                         }
                     }.get()
 
-                    assertTrue(
-                        "project has to have at least one module",
-                        ModuleManager.getInstance(project).modules.isNotEmpty()
-                    )
+                    val modules = ModuleManager.getInstance(project).modules
+                    assertTrue("project has to have at least one module", modules.isNotEmpty())
+
+                    logMessage { "modules of $name: ${modules.map { m -> m.name }}" }
 
                     lastProject = project
                     VirtualFileManager.getInstance().syncRefresh()
@@ -231,7 +239,7 @@ abstract class AbstractPerformanceProjectsTest : UsefulTestCase() {
                         project.save()
                     }
 
-                    println("# project '$name' successfully opened")
+                    logMessage { "project '$name' successfully opened" }
 
                     // close all project but last - we're going to return and use it further
                     if (counter < warmUpIterations + iterations - 1) {
@@ -250,6 +258,8 @@ abstract class AbstractPerformanceProjectsTest : UsefulTestCase() {
 
             dispatchAllInvocationEvents()
 
+            logMessage { "project $name is ${if (project.isInitialized) "initialized" else "not initialized"}" }
+
             with(DumbService.getInstance(project)) {
                 queueTask(UnindexedFilesUpdater(project))
                 completeJustSubmittedTasks()
@@ -262,42 +272,14 @@ abstract class AbstractPerformanceProjectsTest : UsefulTestCase() {
         return lastProject!!
     }
 
-    fun openGradleProject(projectPath: String, project: Project) {
-        dispatchAllInvocationEvents()
-
-        val virtualFile = LocalFileSystem.getInstance().refreshAndFindFileByPath(projectPath)!!
-
-        FileDocumentManager.getInstance().saveAllDocuments()
-
-        val path = Paths.get(virtualFile.path)
-        GradleProjectOpenProcessor.openGradleProject(project, null, path)
-
-        dispatchAllInvocationEvents()
-        runInEdtAndWait {
-            PlatformTestUtil.saveProject(project)
-        }
-    }
-
     private fun refreshGradleProjectIfNeeded(projectPath: String, project: Project) {
         if (listOf("build.gradle.kts", "build.gradle").map { name -> Paths.get(projectPath, name).exists() }.find { e -> e } != true) return
 
-        ExternalProjectsManagerImpl.getInstance(project).setStoreExternally(false)
+        ExternalProjectsManagerImpl.getInstance(project).setStoreExternally(true)
 
-        GradleProjectOpenProcessor.openGradleProject(project, null, Paths.get(projectPath))
+        refreshGradleProject(projectPath, project)
 
-        val gradleArguments = System.getProperty("kotlin.test.gradle.import.arguments")
-        ExternalSystemUtil.refreshProjects(
-            ImportSpecBuilder(project, GradleConstants.SYSTEM_ID)
-                .forceWhenUptodate()
-                .useDefaultCallback()
-                .use(ProgressExecutionMode.MODAL_SYNC)
-                .also {
-                    gradleArguments?.run(it::withArguments)
-                }
-        )
-
-        dispatchAllInvocationEvents()
-        ExternalProjectsManagerImpl.getInstance(project).setStoreExternally(false)
+        //ExternalProjectsManagerImpl.getInstance(project).setStoreExternally(false)
         dispatchAllInvocationEvents()
 
         // WARNING: [VD] DO NOT SAVE PROJECT AS IT COULD PERSIST WRONG MODULES INFO

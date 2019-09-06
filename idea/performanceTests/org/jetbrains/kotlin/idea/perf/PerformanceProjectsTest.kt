@@ -15,6 +15,9 @@ import com.intellij.testFramework.propertyBased.MadTestingUtil
 import org.jetbrains.kotlin.idea.core.script.ScriptConfigurationManager
 import org.jetbrains.kotlin.idea.highlighter.KotlinPsiChecker
 import org.jetbrains.kotlin.idea.highlighter.KotlinPsiCheckerAndHighlightingUpdater
+import org.jetbrains.kotlin.idea.perf.Stats.Companion.TEST_KEY
+import org.jetbrains.kotlin.idea.perf.Stats.Companion.runAndMeasure
+import org.jetbrains.kotlin.idea.perf.Stats.Companion.tcSuite
 import org.jetbrains.kotlin.idea.testFramework.Fixture
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.test.assertNotEquals
@@ -207,7 +210,7 @@ class PerformanceProjectsTest : AbstractPerformanceProjectsTest() {
             highlightFile {
                 val testName = "fileAnalysis ${notePrefix(note)}${simpleFilename(fileName)}"
                 val extraStats = Stats("${stats.name} $testName")
-                val extraTimingsNs = mutableListOf<Long>()
+                val extraTimingsNs = mutableListOf<Map<String, Any>?>()
 
                 val warmUpIterations = 3
                 val iterations = 10
@@ -223,14 +226,12 @@ class PerformanceProjectsTest : AbstractPerformanceProjectsTest() {
 
                 extraStats.printWarmUpTimings(
                     "annotator",
-                    Array(warmUpIterations, init = { null }),
-                    extraTimingsNs.take(warmUpIterations).toLongArray()
+                    extraTimingsNs.take(warmUpIterations).toTypedArray()
                 )
 
                 extraStats.appendTimings(
                     "annotator",
-                    Array(iterations, init = { null }),
-                    extraTimingsNs.drop(warmUpIterations).toLongArray()
+                    extraTimingsNs.drop(warmUpIterations).toTypedArray()
                 )
             }
         } finally {
@@ -277,7 +278,7 @@ class PerformanceProjectsTest : AbstractPerformanceProjectsTest() {
     }
 
     fun perfKtsFileAnalysisTearDown(
-        extraTimingsNs: MutableList<Long>,
+        extraTimingsNs: MutableList<Map<String, Any>?>,
         project: Project
     ): (TestData<Fixture, Pair<Long, List<HighlightInfo>>>) -> Unit {
         return {
@@ -286,7 +287,7 @@ class PerformanceProjectsTest : AbstractPerformanceProjectsTest() {
                     assertTrue(v.second.isNotEmpty())
                     assertNotEquals(0, timer.get())
 
-                    extraTimingsNs.add(timer.get() - v.first)
+                    extraTimingsNs.add(mapOf(TEST_KEY to (timer.get() - v.first)))
 
                 }
                 cleanupCaches(project, fixture.vFile)
