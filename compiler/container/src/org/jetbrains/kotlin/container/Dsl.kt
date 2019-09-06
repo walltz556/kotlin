@@ -38,6 +38,11 @@ fun <T : Any> ComponentProvider.tryGetService(request: Class<T>): T? {
     return resolve(request)?.getValue() as T?
 }
 
+@Suppress("UNCHECKED_CAST")
+fun <T : Any> ComponentProvider.tryGetIterableServices(argumentType: Class<T>): Iterable<T>? {
+    return resolveIterable(argumentType)?.getValue() as Iterable<T>?
+}
+
 fun <T : Any> ComponentProvider.getService(request: Class<T>): T {
     return tryGetService(request) ?: throw UnresolvedServiceException(this, request)
 }

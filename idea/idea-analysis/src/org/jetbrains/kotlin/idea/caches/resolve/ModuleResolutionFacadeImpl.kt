@@ -23,6 +23,7 @@ import com.intellij.psi.PsiElement
 import org.jetbrains.kotlin.analyzer.AnalysisResult
 import org.jetbrains.kotlin.container.get
 import org.jetbrains.kotlin.container.getService
+import org.jetbrains.kotlin.container.tryGetIterableServices
 import org.jetbrains.kotlin.container.tryGetService
 import org.jetbrains.kotlin.descriptors.DeclarationDescriptor
 import org.jetbrains.kotlin.descriptors.ModuleDescriptor
@@ -95,6 +96,10 @@ internal class ModuleResolutionFacadeImpl(
 
     override fun <T : Any> tryGetFrontendService(element: PsiElement, serviceClass: Class<T>): T? {
         return projectFacade.resolverForElement(element).componentProvider.tryGetService(serviceClass)
+    }
+
+    override fun <T : Any> tryGetIterableFrontendServices(element: PsiElement, serviceClass: Class<T>): Iterable<T>? {
+        return projectFacade.resolverForElement(element).componentProvider.tryGetIterableServices(serviceClass)
     }
 
     private fun <T : Any> getFrontendService(ideaModuleInfo: IdeaModuleInfo, serviceClass: Class<T>): T {

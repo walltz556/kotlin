@@ -30,6 +30,7 @@ interface ComponentContainer {
 
 interface ComponentProvider {
     fun resolve(request: Type): ValueDescriptor?
+    fun resolveIterable(argumentTypeOfIterable: Type): ValueDescriptor?
     fun <T> create(request: Class<T>): T
 }
 
@@ -71,6 +72,10 @@ class StorageComponentContainer(
 
     override fun resolve(request: Type): ValueDescriptor? {
         return resolve(request, unknownContext)
+    }
+
+    override fun resolveIterable(argumentTypeOfIterable: Type): ValueDescriptor? {
+        return IterableDescriptor(componentStorage.resolveMultiple(argumentTypeOfIterable, unknownContext))
     }
 
     private fun resolveIterable(request: Type, context: ValueResolveContext): ValueDescriptor? {

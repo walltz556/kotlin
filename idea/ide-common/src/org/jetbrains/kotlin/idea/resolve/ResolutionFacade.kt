@@ -47,6 +47,8 @@ interface ResolutionFacade {
     fun <T : Any> getFrontendService(element: PsiElement, serviceClass: Class<T>): T
     fun <T : Any> tryGetFrontendService(element: PsiElement, serviceClass: Class<T>): T?
 
+    fun <T : Any> tryGetIterableFrontendServices(element: PsiElement, serviceClass: Class<T>): Iterable<T>?
+
     fun <T : Any> getFrontendService(moduleDescriptor: ModuleDescriptor, serviceClass: Class<T>): T
 
 }
