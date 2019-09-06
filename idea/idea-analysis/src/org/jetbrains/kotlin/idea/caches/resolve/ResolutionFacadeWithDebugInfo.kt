@@ -89,6 +89,12 @@ private class ResolutionFacadeWithDebugInfo(
         }
     }
 
+    override fun <T : Any> tryGetIterableFrontendServices(element: PsiElement, serviceClass: Class<T>): Iterable<T>? {
+        return wrapExceptions({ ResolvingWhat(listOf(element), serviceClass = serviceClass) }) {
+            delegate.tryGetIterableFrontendServices(element, serviceClass)
+        }
+    }
+
     override fun <T : Any> getFrontendService(moduleDescriptor: ModuleDescriptor, serviceClass: Class<T>): T {
         return wrapExceptions({ ResolvingWhat(serviceClass = serviceClass, moduleDescriptor = moduleDescriptor) }) {
             delegate.getFrontendService(moduleDescriptor, serviceClass)
