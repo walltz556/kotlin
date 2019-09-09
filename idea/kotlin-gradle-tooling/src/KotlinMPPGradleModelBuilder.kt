@@ -15,6 +15,7 @@ import org.gradle.api.logging.Logging
 import org.gradle.api.provider.Property
 import org.gradle.api.provider.Provider
 import org.gradle.api.tasks.Exec
+import org.gradle.api.tasks.TaskProvider
 import org.jetbrains.kotlin.gradle.KotlinMPPGradleModel.Companion.NO_KOTLIN_NATIVE_HOME
 import org.jetbrains.plugins.gradle.model.*
 import org.jetbrains.plugins.gradle.tooling.ErrorMessageBuilder
@@ -314,7 +315,20 @@ class KotlinMPPGradleModelBuilder : ModelBuilderService {
     }
 
     private fun buildTestTasks(project: Project, gradleTarget: Named): Collection<KotlinTestTask> {
-        // TODO: use the test runs API to extract the test tasks once it is available
+        val testRuns = gradleTarget.javaClass.getMethodOrNull("getTestRuns")?.invoke(gradleTarget) as? Iterable<Any>
+        if (testRuns != null) {
+            val testReports = testRuns.mapNotNull { (it.javaClass.getMethodOrNull("getExecutionTask")?.invoke(it) as? TaskProvider<Task>)?.get() }
+            val testTasks = testReports.flatMap {
+                ((it.javaClass.getMethodOrNull("getTestTasks")?.invoke(it) as? Collection<Provider<Task>>)?.map { it.get() })
+                    ?: listOf(it)
+            }
+            return testTasks.mapNotNull {
+                val name = it.name
+                val compilation = it.javaClass.getMethodOrNull("getCompilation")?.invoke(it)
+                val compilationName = compilation?.javaClass?.getMethodOrNull("getCompilationName")?.invoke(compilation)?.toString() ?: KotlinCompilation.TEST_COMPILATION_NAME
+                KotlinTestTaskImpl(name, compilationName)
+            }.toList()
+        }
 
         // Otherwise, find the Kotlin test task with names matching the target name. This is a workaround that makes assumptions about
         // the tasks naming logic and is therefore an unstable and temporary solution until test runs API is implemented:
@@ -342,7 +356,7 @@ class KotlinMPPGradleModelBuilder : ModelBuilderService {
                         testTaskDisambiguationClassifier != null &&
                         testTaskDisambiguationClassifier.startsWith(targetDisambiguationClassifier.orEmpty())
             }
-        }.map(::KotlinTestTaskImpl)
+        }.map { KotlinTestTaskImpl(it, KotlinCompilation.TEST_COMPILATION_NAME) }
     }
 
     private fun buildTargetJar(gradleTarget: Named, project: Project): KotlinTargetJar? {

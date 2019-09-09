@@ -30,6 +30,7 @@ import org.jetbrains.kotlin.cli.common.arguments.CommonCompilerArguments
 import org.jetbrains.kotlin.cli.common.arguments.K2JVMCompilerArguments
 import org.jetbrains.kotlin.cli.common.arguments.ManualLanguageFeatureSetting
 import org.jetbrains.kotlin.cli.common.arguments.parseCommandLineArguments
+import org.jetbrains.kotlin.config.ExternalSystemTestTask
 import org.jetbrains.kotlin.config.LanguageFeature
 import org.jetbrains.kotlin.gradle.*
 import org.jetbrains.kotlin.idea.configuration.GradlePropertiesFileFacade.Companion.KOTLIN_NOT_IMPORTED_COMMON_SOURCE_SETS_SETTING
@@ -150,7 +151,7 @@ open class KotlinMPPGradleProjectResolver : AbstractProjectResolverExtension() {
                     externalProject?.sourceSets?.values?.forEach { sourceSet ->
                         sourceSet.dependencies.forEach { dependency ->
                             dependency.getDependencyArtifacts().map { toCanonicalPath(it.absolutePath) }
-                                .filter { mppArtifacts.keys.contains(it) }.forEach {filePath ->
+                                .filter { mppArtifacts.keys.contains(it) }.forEach { filePath ->
                                     (artifactToDependency[filePath] ?: ArrayList<ExternalDependency>().also { newCollection ->
                                         artifactToDependency[filePath] = newCollection
                                     }).add(dependency)
@@ -258,6 +259,8 @@ open class KotlinMPPGradleProjectResolver : AbstractProjectResolverExtension() {
 
             val sourceSetMap = projectDataNode.getUserData(GradleProjectResolver.RESOLVED_SOURCE_SETS)!!
 
+            val sourceSetToTestTasks = calculateTestTasks(mppModel, gradleModule, resolverCtx)
+
             val sourceSetToCompilationData = LinkedHashMap<KotlinSourceSet, MutableSet<GradleSourceSetData>>()
             for (target in mppModel.targets) {
                 if (target.platform == KotlinPlatform.ANDROID) continue
@@ -304,7 +307,13 @@ open class KotlinMPPGradleProjectResolver : AbstractProjectResolverExtension() {
                         it.sdkName = jdkName
                     }
 
-                    val kotlinSourceSet = createSourceSetInfo(compilation, gradleModule, resolverCtx) ?: continue
+                    val kotlinSourceSet = createSourceSetInfo(
+                        compilation,
+                        gradleModule,
+                        resolverCtx
+                    ) ?: continue
+                    kotlinSourceSet.externalSystemTestTasks =
+                        compilation.sourceSets.map { sourceSetToTestTasks[it] }.filterNotNull().firstOrNull() ?: emptyList()
 
                     if (compilation.platform == KotlinPlatform.JVM || compilation.platform == KotlinPlatform.ANDROID) {
                         compilationData.targetCompatibility = (kotlinSourceSet.compilerArguments as? K2JVMCompilerArguments)?.jvmTarget
@@ -363,6 +372,8 @@ open class KotlinMPPGradleProjectResolver : AbstractProjectResolverExtension() {
                 }
 
                 val kotlinSourceSet = createSourceSetInfo(sourceSet, gradleModule, resolverCtx) ?: continue
+                kotlinSourceSet.externalSystemTestTasks = sourceSetToTestTasks[sourceSet] ?: emptyList()
+                mppModel.targets.map { target -> target.testTasks }
 
                 val sourceSetDataNode =
                     (existingSourceSetDataNode ?: mainModuleNode.createChild(GradleSourceSetData.KEY, sourceSetData)).also {
@@ -566,7 +577,12 @@ open class KotlinMPPGradleProjectResolver : AbstractProjectResolverExtension() {
             return ideModule.findChildModuleById(usedModuleId)
         }
 
-        private fun createContentRootData(sourceDirs: Set<File>, sourceType: ExternalSystemSourceType, packagePrefix: String?, parentNode: DataNode<*>) {
+        private fun createContentRootData(
+            sourceDirs: Set<File>,
+            sourceType: ExternalSystemSourceType,
+            packagePrefix: String?,
+            parentNode: DataNode<*>
+        ) {
             for (sourceDir in sourceDirs) {
                 val contentRootData = ContentRootData(GradleConstants.SYSTEM_ID, sourceDir.absolutePath)
                 contentRootData.storePath(sourceType, sourceDir.absolutePath, packagePrefix)
@@ -651,7 +667,11 @@ open class KotlinMPPGradleProjectResolver : AbstractProjectResolverExtension() {
             return PathUtilRt.suggestFileName(moduleName.toString(), true, false)
         }
 
-        private fun createExternalSourceSet(compilation: KotlinCompilation, compilationData: GradleSourceSetData, mppModel: KotlinMPPGradleModel): ExternalSourceSet {
+        private fun createExternalSourceSet(
+            compilation: KotlinCompilation,
+            compilationData: GradleSourceSetData,
+            mppModel: KotlinMPPGradleModel
+        ): ExternalSourceSet {
             return DefaultExternalSourceSet().also { sourceSet ->
                 val effectiveClassesDir = compilation.output.effectiveClassesDir
                 val resourcesDir = compilation.output.resourcesDir
@@ -687,7 +707,11 @@ open class KotlinMPPGradleProjectResolver : AbstractProjectResolverExtension() {
         }
 
 
-        private fun createExternalSourceSet(ktSourceSet: KotlinSourceSet, ktSourceSetData: GradleSourceSetData, mppModel: KotlinMPPGradleModel): ExternalSourceSet {
+        private fun createExternalSourceSet(
+            ktSourceSet: KotlinSourceSet,
+            ktSourceSetData: GradleSourceSetData,
+            mppModel: KotlinMPPGradleModel
+        ): ExternalSourceSet {
             return DefaultExternalSourceSet().also { sourceSet ->
                 sourceSet.name = ktSourceSet.name
                 sourceSet.targetCompatibility = ktSourceSetData.targetCompatibility
@@ -744,6 +768,7 @@ open class KotlinMPPGradleProjectResolver : AbstractProjectResolverExtension() {
         }
 
         // TODO: Unite with other createSourceSetInfo
+        // This method is used in Android side of import and it's signature could not be changed
         fun createSourceSetInfo(
             compilation: KotlinCompilation,
             gradleModule: IdeaModule,
