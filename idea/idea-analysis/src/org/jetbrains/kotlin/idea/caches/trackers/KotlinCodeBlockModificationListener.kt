@@ -174,9 +174,12 @@ class KotlinCodeBlockModificationListener(
             }
 
             val blockDeclaration = KtPsiUtil.getTopmostParentOfTypes(element, *BLOCK_DECLARATION_TYPES) as? KtDeclaration ?: return null
-            if (KtPsiUtil.isLocal(blockDeclaration)) return null // should not be local declaration
 
             when (blockDeclaration) {
+                is KtClassInitializer -> {
+                    return blockDeclaration
+                }
+
                 is KtNamedFunction -> {
                     if (blockDeclaration.hasBlockBody()) {
                         return blockDeclaration.bodyExpression?.takeIf { it.isAncestor(element) }
@@ -214,6 +217,7 @@ class KotlinCodeBlockModificationListener(
         }
 
         private val BLOCK_DECLARATION_TYPES = arrayOf<Class<out KtDeclaration>>(
+            KtClassInitializer::class.java,
             KtProperty::class.java,
             KtNamedFunction::class.java,
             KtScriptInitializer::class.java

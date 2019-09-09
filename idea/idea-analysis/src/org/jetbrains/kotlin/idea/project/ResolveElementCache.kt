@@ -104,7 +104,7 @@ class ResolveElementCache(
             CachedValueProvider<MutableMap<KtExpression, CachedPartialResolve>> {
                 CachedValueProvider.Result.create(
                     ContainerUtil.createConcurrentWeakKeySoftValueMap<KtExpression, CachedPartialResolve>(),
-                    PsiModificationTracker.MODIFICATION_COUNT,
+                    KotlinCodeBlockModificationListener.getInstance(project).kotlinOutOfCodeBlockTracker,
                     resolveSession.exceptionTracker
                 )
             },
@@ -136,73 +136,75 @@ class ResolveElementCache(
         contextElements: Collection<KtElement>?,
         bodyResolveMode: BodyResolveMode
     ): BindingContext {
-        if (contextElements == null) {
-            assert(bodyResolveMode == BodyResolveMode.FULL)
-        }
-
-        // check if full additional resolve already performed and is up-to-date
-        val fullResolveMap = fullResolveCache.value
-        val cachedFullResolve = fullResolveMap[resolveElement]
-        if (cachedFullResolve != null) {
-            if (cachedFullResolve.isUpToDate(resolveElement)) {
-                return cachedFullResolve.bindingContext
-            } else {
-                fullResolveMap.remove(resolveElement) // remove outdated cache entry
-            }
-        }
-
-        when (bodyResolveMode) {
-            BodyResolveMode.FULL -> {
-                val bindingContext = performElementAdditionalResolve(resolveElement, null, BodyResolveMode.FULL).first
-                fullResolveMap[resolveElement] = CachedFullResolve(bindingContext, resolveElement)
-                return bindingContext
+        synchronized(resolveElement) {
+            if (contextElements == null) {
+                assert(bodyResolveMode == BodyResolveMode.FULL)
             }
 
-            else -> {
-                if (resolveElement !is KtDeclaration) {
-                    return getElementsAdditionalResolve(resolveElement, null, BodyResolveMode.FULL)
+            // check if full additional resolve already performed and is up-to-date
+            val fullResolveMap = fullResolveCache.value
+            val cachedFullResolve = fullResolveMap[resolveElement]
+            if (cachedFullResolve != null) {
+                if (cachedFullResolve.isUpToDate(resolveElement)) {
+                    return cachedFullResolve.bindingContext
+                } else {
+                    fullResolveMap.remove(resolveElement) // remove outdated cache entry
                 }
+            }
 
-                val file = resolveElement.getContainingKtFile()
-                val statementsToResolve =
-                    contextElements!!.map { PartialBodyResolveFilter.findStatementToResolve(it, resolveElement) }.distinct()
-                val partialResolveMap = partialBodyResolveCache.value
-                val cachedResults = statementsToResolve.map { partialResolveMap[it ?: resolveElement] }
-                if (cachedResults.all {
-                        it != null && it.isUpToDate(
-                            file,
-                            bodyResolveMode
-                        )
-                    }) { // partial resolve is already cached for these statements
-                    return CompositeBindingContext.create(cachedResults.map { it!!.bindingContext }.distinct())
-                }
-
-                val (bindingContext, statementFilter) = performElementAdditionalResolve(resolveElement, contextElements, bodyResolveMode)
-
-                if (statementFilter == StatementFilter.NONE &&
-                    bodyResolveMode.doControlFlowAnalysis && !bodyResolveMode.bindingTraceFilter.ignoreDiagnostics
-                ) {
-                    // Without statement filter, we analyze everything, so we can count partial resolve result as full resolve
-                    // But we can do this only if our resolve mode also provides *both* CFA and diagnostics
-                    // This is true only for PARTIAL_WITH_DIAGNOSTICS resolve mode
+            when (bodyResolveMode) {
+                BodyResolveMode.FULL -> {
+                    val bindingContext = performElementAdditionalResolve(resolveElement, null, BodyResolveMode.FULL).first
                     fullResolveMap[resolveElement] = CachedFullResolve(bindingContext, resolveElement)
                     return bindingContext
                 }
 
-                val resolveToCache = CachedPartialResolve(bindingContext, file, bodyResolveMode)
+                else -> {
+                    if (resolveElement !is KtDeclaration) {
+                        return getElementsAdditionalResolve(resolveElement, null, BodyResolveMode.FULL)
+                    }
 
-                if (statementFilter is PartialBodyResolveFilter) {
-                    for (statement in statementFilter.allStatementsToResolve) {
-                        if (bindingContext[BindingContext.PROCESSED, statement] == true) {
-                            partialResolveMap.putIfAbsent(statement, resolveToCache)
+                    val file = resolveElement.getContainingKtFile()
+                    val statementsToResolve =
+                        contextElements!!.map { PartialBodyResolveFilter.findStatementToResolve(it, resolveElement) }.distinct()
+                    val partialResolveMap = partialBodyResolveCache.value
+                    val cachedResults = statementsToResolve.map { partialResolveMap[it ?: resolveElement] }
+                    if (cachedResults.all {
+                            it != null && it.isUpToDate(
+                                file,
+                                bodyResolveMode
+                            )
+                        }) { // partial resolve is already cached for these statements
+                        return CompositeBindingContext.create(cachedResults.map { it!!.bindingContext }.distinct())
+                    }
+
+                    val (bindingContext, statementFilter) = performElementAdditionalResolve(resolveElement, contextElements, bodyResolveMode)
+
+                    if (statementFilter == StatementFilter.NONE &&
+                        bodyResolveMode.doControlFlowAnalysis && !bodyResolveMode.bindingTraceFilter.ignoreDiagnostics
+                    ) {
+                        // Without statement filter, we analyze everything, so we can count partial resolve result as full resolve
+                        // But we can do this only if our resolve mode also provides *both* CFA and diagnostics
+                        // This is true only for PARTIAL_WITH_DIAGNOSTICS resolve mode
+                        fullResolveMap[resolveElement] = CachedFullResolve(bindingContext, resolveElement)
+                        return bindingContext
+                    }
+
+                    val resolveToCache = CachedPartialResolve(bindingContext, file, bodyResolveMode)
+
+                    if (statementFilter is PartialBodyResolveFilter) {
+                        for (statement in statementFilter.allStatementsToResolve) {
+                            if (bindingContext[BindingContext.PROCESSED, statement] == true) {
+                                partialResolveMap.putIfAbsent(statement, resolveToCache)
+                            }
                         }
                     }
+
+                    // we use the whole declaration key in the map to obtain resolve not inside any block (e.g. default parameter values)
+                    partialResolveMap[resolveElement] = resolveToCache
+
+                    return bindingContext
                 }
-
-                // we use the whole declaration key in the map to obtain resolve not inside any block (e.g. default parameter values)
-                partialResolveMap[resolveElement] = resolveToCache
-
-                return bindingContext
             }
         }
     }
