@@ -393,6 +393,41 @@ open class KotlinMPPGradleProjectResolver : AbstractProjectResolverExtension() {
 
             mainModuleNode.coroutines = mppModel.extraFeatures.coroutinesState
             mainModuleNode.isHmpp = mppModel.extraFeatures.isHMPPEnabled
+            //TODO improve passing version of used multiplatform
+        }
+
+        private fun calculateTestTasks(
+            mppModel: KotlinMPPGradleModel,
+            gradleModule: IdeaModule,
+            resolverCtx: ProjectResolverContext
+        ): Map<KotlinSourceSet, Collection<ExternalSystemTestTask>> {
+            val sourceSetToTestTasks: MutableMap<KotlinSourceSet, MutableCollection<ExternalSystemTestTask>> = HashMap()
+            val dependsOnReverceGraph: MutableMap<String, MutableSet<KotlinSourceSet>> = HashMap()
+            mppModel.targets.forEach { target ->
+                target.compilations.forEach { compilation ->
+                    val testTasks = target.testTasks.filter { testTask -> testTask.compilationName == compilation.name }
+                        .map { ExternalSystemTestTask(it.taskName, getKotlinModuleId(gradleModule, compilation, resolverCtx), target.name) }
+                    compilation.sourceSets.forEach { sourceSet ->
+                        sourceSetToTestTasks[sourceSet] = LinkedHashSet(testTasks)
+                        sourceSet.dependsOnSourceSets.forEach { dependentModule ->
+                            (dependsOnReverceGraph[dependentModule]
+                                ?: LinkedHashSet<KotlinSourceSet>().also { dependsOnReverceGraph[dependentModule] = it })
+                                .add(sourceSet)
+                        }
+                    }
+                }
+            }
+            mppModel.sourceSets.forEach { sourceSetName, sourceSet ->
+                (dependsOnReverceGraph[sourceSetName] ?: (LinkedHashSet<KotlinSourceSet>() as MutableSet<KotlinSourceSet>).also {
+                    dependsOnReverceGraph[sourceSetName] = it
+                }).forEach { dependingSourceSet ->
+                    (sourceSetToTestTasks[sourceSet]
+                        ?: (LinkedHashSet<KotlinSourceSet>() as MutableCollection<ExternalSystemTestTask>).also {
+                            sourceSetToTestTasks[sourceSet] = it
+                        }).addAll(sourceSetToTestTasks[dependingSourceSet] ?: emptyList())
+                }
+            }
+            return sourceSetToTestTasks
         }
 
         fun populateContentRoots(
