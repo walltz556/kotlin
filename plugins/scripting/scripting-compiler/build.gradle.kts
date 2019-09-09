@@ -28,6 +28,7 @@ dependencies {
     testCompile(projectTests(":compiler:tests-common"))
     testCompile(commonDep("junit:junit"))
 
+    testRuntimeOnly(project(":kotlin-script-runtime"))
     testRuntimeOnly(intellijCoreDep()) { includeJars("intellij-core") }
     testRuntimeOnly(intellijDep()) { includeJars("jps-model") }
 }
