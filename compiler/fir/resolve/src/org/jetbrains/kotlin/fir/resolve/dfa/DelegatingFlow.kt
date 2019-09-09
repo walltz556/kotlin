@@ -23,7 +23,8 @@ interface DelegatingFlow {
     fun getTopFlow(): DelegatingFlow
 }
 
-private class DelegatingFlowImpl(
+// TODO: make private
+class DelegatingFlowImpl(
     val previousFlow: DelegatingFlowImpl?,
     val approvedInfos: ApprovedInfos = mutableMapOf(),
     val conditionalInfos: ConditionalInfos = ArrayListMultimap.create()
