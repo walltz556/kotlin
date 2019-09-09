@@ -33,16 +33,30 @@ internal class KotlinCacheServiceForScripts(
         return when {
             // In some cases (for ex. during scratch compilation) we analyzing simple KtFile in context of KtScript,
             // so its moduleInfo will be ScriptModuleInfo, but it won't be a script it self
-            moduleInfo is ScriptModuleInfo || files.filter { it.isScript() }.toSet().isNotEmpty() -> {
+            isRegularScript(moduleInfo, files) -> {
                 val projectFacade = getFacadeForScripts(files.toSet())
                 ModuleResolutionFacadeImpl(projectFacade, moduleInfo).createdFor(files, moduleInfo)
             }
-            moduleInfo is ScriptDependenciesInfo || moduleInfo is ScriptDependenciesSourceInfo -> {
+            isScriptDependencies(moduleInfo) -> {
                 val projectFacade = getFacadeForScriptDependencies(files.toSet())
                 ModuleResolutionFacadeImpl(projectFacade, moduleInfo).createdFor(files, moduleInfo)
             }
             else -> null
         }
+    }
+
+    private fun isScriptDependencies(moduleInfo: IdeaModuleInfo) =
+        moduleInfo is ScriptDependenciesInfo || moduleInfo is ScriptDependenciesSourceInfo
+
+    private fun isRegularScript(
+        moduleInfo: IdeaModuleInfo,
+        files: List<KtFile>
+    ): Boolean {
+        if (moduleInfo is ScriptModuleInfo) return true
+        if (moduleInfo is ModuleSourceInfo) {
+            return files.filter { it.isScript() }.toSet().isNotEmpty()
+        }
+        return false
     }
 
     fun getFacadeForScriptDependencies(moduleInfo: IdeaModuleInfo): ResolutionFacade? {
@@ -143,7 +157,7 @@ internal class KotlinCacheServiceForScripts(
         val settings = scriptModuleInfo.platformSettings(project, platform)
 
         if (scriptModuleInfo is ModuleSourceInfo) {
-            return facadeForModules(settings)
+            return getOrBuildScriptsGlobalFacade().wrapWithSyntheticFiles(facadeForModules(settings), resolverForScriptsName, files)
         }
 
         check(scriptModuleInfo is ScriptModuleInfo) {
